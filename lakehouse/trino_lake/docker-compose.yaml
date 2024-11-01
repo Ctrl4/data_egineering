@@ -1,0 +1,111 @@
+###########################################
+# Iceberg - Trino - Iceberg-Rest Setup
+###########################################
+
+# Common config shared between services
+x-common-environment: &common-environment
+  AWS_ACCESS_KEY_ID: admin
+  AWS_SECRET_ACCESS_KEY: password
+  AWS_REGION: us-east-1
+
+services:
+  # Spark Notebook Server
+  spark-iceberg:
+    image: alexmerced/spark33-notebook
+    container_name: spark-iceberg
+    networks:
+      iceberg_net:
+    depends_on:
+      - catalog
+      - storage
+    volumes:
+      - ./warehouse:/home/docker/warehouse
+      - ./notebooks:/home/docker/notebooks
+      - ./datasets:/home/docker/datasets
+    environment:
+      <<: *common-environment
+    ports:
+      - 8888:8888
+      - 8080:8080
+      - 10000:10000
+      - 10001:10001
+  # Iceberg Rest Catalog Server Using Postgres to store metadata
+  catalog:
+    image: tabulario/iceberg-rest
+    container_name: catalog
+    networks:
+      iceberg_net:
+    depends_on:
+      metastore_db:
+        condition: service_healthy
+    ports:
+      - 8181:8181
+    environment:
+      <<: *common-environment
+      CATALOG_WAREHOUSE: s3://datalakehouse/
+      CATALOG_IO__IMPL: org.apache.iceberg.aws.s3.S3FileIO
+      CATALOG_S3_ENDPOINT: http://storage:9000
+      CATALOG_URI: jdbc:postgresql://metastore_db/iceberg_catalog
+      CATALOG_JDBC_USER: admin
+      CATALOG_JDBC_PASSWORD: password
+
+  metastore_db:
+    image: postgres:13
+    container_name: metastore_db
+    environment:
+      PGDATA: /var/lib/postgresql/data
+      POSTGRES_USER: admin
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: iceberg_catalog
+      POSTGRES_HOST_AUTH_METHOD: md5
+    networks:
+      iceberg_net:
+    volumes:
+      - ./postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", 'pg_isready -U admin -d iceberg_catalog']
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # Minio Storage Server
+  storage:
+    image: minio/minio:RELEASE.2024-10-13T13-34-11Z
+    container_name: storage
+    environment:
+      - MINIO_ROOT_USER=admin
+      - MINIO_ROOT_PASSWORD=password
+      - MINIO_DOMAIN=storage
+      - MINIO_REGION_NAME=us-east-1
+      - MINIO_REGION=us-east-1
+    networks:
+      iceberg_net:
+        aliases:
+          - datalakehouse.storage
+    volumes:
+      - ./warehouse:/data
+    ports:
+      - 9001:9001
+      - 9000:9000
+    command: ["server", "/data", "--console-address", ":9001"]
+  # Dremio
+  trino:
+    image: trinodb/trino:463
+    container_name: trino
+    volumes:
+      - ./trino/iceberg.properties:/etc/trino/catalog/iceberg.properties
+    ports:
+      - 9047:8080
+    networks:
+      iceberg_net:
+    depends_on:
+      - catalog
+      - storage
+    environment:
+      <<: *common-environment
+
+networks:
+  iceberg_net:
+
+
+
