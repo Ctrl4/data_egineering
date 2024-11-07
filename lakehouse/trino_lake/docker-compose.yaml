@@ -9,26 +9,27 @@ x-common-environment: &common-environment
   AWS_REGION: us-east-1
 
 services:
-  # Spark Notebook Server
-  spark-iceberg:
-    image: alexmerced/spark33-notebook
-    container_name: spark-iceberg
+  # Minio Storage Server
+  storage:
+    image: minio/minio:RELEASE.2024-10-13T13-34-11Z
+    container_name: storage
+    environment:
+      - MINIO_ROOT_USER=admin
+      - MINIO_ROOT_PASSWORD=password
+      - MINIO_DOMAIN=storage
+      - MINIO_REGION_NAME=us-east-1
+      - MINIO_REGION=us-east-1
     networks:
       iceberg_net:
-    depends_on:
-      - catalog
-      - storage
+        aliases:
+          - datalakehouse.storage
     volumes:
-      - ./warehouse:/home/docker/warehouse
-      - ./notebooks:/home/docker/notebooks
-      - ./datasets:/home/docker/datasets
-    environment:
-      <<: *common-environment
+      - ./warehouse:/data
     ports:
-      - 8888:8888
-      - 8080:8080
-      - 10000:10000
-      - 10001:10001
+      - 9001:9001
+      - 9000:9000
+    command: ["server", "/data", "--console-address", ":9001"]
+
   # Iceberg Rest Catalog Server Using Postgres to store metadata
   catalog:
     image: tabulario/iceberg-rest
@@ -68,27 +69,7 @@ services:
       timeout: 5s
       retries: 5
 
-  # Minio Storage Server
-  storage:
-    image: minio/minio:RELEASE.2024-10-13T13-34-11Z
-    container_name: storage
-    environment:
-      - MINIO_ROOT_USER=admin
-      - MINIO_ROOT_PASSWORD=password
-      - MINIO_DOMAIN=storage
-      - MINIO_REGION_NAME=us-east-1
-      - MINIO_REGION=us-east-1
-    networks:
-      iceberg_net:
-        aliases:
-          - datalakehouse.storage
-    volumes:
-      - ./warehouse:/data
-    ports:
-      - 9001:9001
-      - 9000:9000
-    command: ["server", "/data", "--console-address", ":9001"]
-  # Dremio
+  # Trino Compute Engine
   trino:
     image: trinodb/trino:463
     container_name: trino
@@ -103,6 +84,27 @@ services:
       - storage
     environment:
       <<: *common-environment
+
+  # Spark Compute Engine
+  spark-iceberg:
+    image: alexmerced/spark33-notebook
+    container_name: spark-iceberg
+    networks:
+      iceberg_net:
+    depends_on:
+      - catalog
+      - storage
+    volumes:
+      - ./warehouse:/home/docker/warehouse
+      - ./notebooks:/home/docker/notebooks
+      - ./datasets:/home/docker/datasets
+    environment:
+      <<: *common-environment
+    ports:
+      - 8888:8888
+      - 8080:8080
+      - 10000:10000
+      - 10001:10001
 
 networks:
   iceberg_net:
